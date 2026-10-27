@@ -1,0 +1,15 @@
+services:
+  setka:
+    build: .
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      SETKA_HTTPS: ${SETKA_HTTPS:-1}
+      SETKA_ADMIN_CODE: ${SETKA_ADMIN_CODE:?Укажите SETKA_ADMIN_CODE в окружении или .env}
+    volumes:
+      - setka_data:/data
+    ports:
+      - "127.0.0.1:8080:8080"
+volumes:
+  setka_data:

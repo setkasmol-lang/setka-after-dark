@@ -32,13 +32,14 @@ MAX_BODY = 16_000
 LOGIN_ATTEMPTS = {}
 LOGIN_LOCK = threading.Lock()
 
+
 PRIZES = [
     ('100 бонусов', 'bonus'),
     ('Энергетик из специального списка', 'product'),
     ('1 игровой час ночью', 'time'),
     ('100 бонусов', 'bonus'),
     ('Бесплатный снек из списка', 'product'),
-    ('Улучшение игровой зоны на 1 час', 'upgrade'),
+    ('Бесплатный кальян при покупке ночного тарифа (1 кальян = 1 компания)', 'product'),
     ('120 бонусов', 'bonus'),
     ('1 игровой час ночью', 'time'),
     ('Энергетик из специального списка', 'product'),
@@ -50,7 +51,7 @@ PRIZES = [
     ('Энергетик из специального списка', 'product'),
     ('1 игровой час ночью', 'time'),
     ('100 бонусов', 'bonus'),
-    ('Улучшение игровой зоны на 1 час', 'upgrade'),
+    ('Бесплатный кальян при покупке ночного тарифа (1 кальян = 1 компания)', 'product'),
     ('Энергетик из специального списка', 'product'),
     ('1 игровой час ночью', 'time'),
     ('120 бонусов', 'bonus'),
@@ -59,16 +60,16 @@ PRIZES = [
     ('Энергетик из специального списка', 'product'),
     ('1 игровой час ночью', 'time'),
     ('100 бонусов', 'bonus'),
-    ('Улучшение игровой зоны на 1 час', 'upgrade'),
+    ('Бесплатный кальян при покупке ночного тарифа (1 кальян = 1 компания)', 'product'),
     ('120 бонусов', 'bonus'),
     ('1 игровой час ночью', 'time'),
     ('120 бонусов', 'bonus'),
 ]
 MILESTONES = {
-    7: 'Фирменная наклейка AFTER DARK',
-    14: 'Фирменная нашивка СЕТКА',
-    21: 'Эксклюзивный мерч SETKA AFTER DARK',
-    30: 'Коллекционная карточка «ЛЕГЕНДА СЕТКИ»',
+    7: 'Фирменный стикерпак',
+    14: 'Случайная игра в Steam на твой аккаунт',
+    21: 'Бесплатная ночь',
+    30: 'Мерч с вашим ником',
 }
 
 
@@ -141,7 +142,7 @@ def init_db():
             'season_name': 'СЕЗОН 01',
             'season_start': '2026-11-01',
             'season_end': '2026-11-30',
-            'rules': 'Каждая отдельная покупка от 400 ₽ с 21:00 до 09:00 даёт +1 к прогрессу. Доступен 1 пропуск за 500 ₽ на участника. Максимум 30 отметок. Подарки отмечает администратор.'
+            'rules': 'Каждая отдельная покупка от 400 ₽ с 21:00 до 09:00 даёт +1 к прогрессу. За одну игровую ночь можно получить только 1 отметку, даже если было несколько покупок. Участие в программе бесплатное. Максимум 30 отметок. Подарки отмечает администратор.'
         }
         for k, v in defaults.items():
             conn.execute('INSERT OR IGNORE INTO settings(name,value) VALUES (?,?)', (k,v))
@@ -254,12 +255,12 @@ class Handler(BaseHTTPRequestHandler):
     def serve_static(self, path):
         mapped = {'/':'index.html','/index.html':'index.html','/admin':'admin.html',
                   '/admin.html':'admin.html','/player':'player.html','/player.html':'player.html',
-                  '/app.css':'app.css','/app.js':'app.js'}
+                  '/app.css':'app.css','/app.js':'app.js','/logo.png':'logo.png'}
         filename=mapped.get(path)
         if not filename: return self.fail(404,'Страница не найдена.')
         filepath=ROOT/'static'/filename
         data=filepath.read_bytes()
-        mime='text/css; charset=utf-8' if filename.endswith('.css') else 'text/javascript; charset=utf-8' if filename.endswith('.js') else 'text/html; charset=utf-8'
+        mime='image/png' if filename.endswith('.png') else 'text/css; charset=utf-8' if filename.endswith('.css') else 'text/javascript; charset=utf-8' if filename.endswith('.js') else 'text/html; charset=utf-8'
         self.response(200,data,mime,private=True)
 
     def get_session(self, conn):
@@ -363,19 +364,19 @@ class Handler(BaseHTTPRequestHandler):
                     conn.execute('INSERT INTO players(nickname,phone,link_token,pass_paid,consent_at,created_at) VALUES(?,?,?,?,?,?)',
                                  (nickname,phone,secrets.token_hex(24),int(paid),consent_at,moscow_now().isoformat(timespec='seconds')))
                     pid=conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-                    log_event(conn,'Участник',f'Создан #{pid}: {nickname}; пропуск: {"оплачен" if paid else "не оплачен"}')
+                    log_event(conn,'Участник',f'Создан #{pid}: {nickname}; участие: {"активно" if paid else "неактивно"}')
                     conn.commit()
                     return self.response(201,{'ok':True,'player':player_payload(conn,get_player(conn,pid),True)})
                 if path=='/api/admin/pass':
                     pid=int(data.get('player_id',0));p=get_player(conn,pid)
                     paid=bool(data.get('paid',False))
                     conn.execute('UPDATE players SET pass_paid=? WHERE id=?',(int(paid),pid))
-                    log_event(conn,'Пропуск',f'#{pid} {p["nickname"]}: {"оплачен" if paid else "снят"}')
+                    log_event(conn,'Статус участия',f'#{pid} {p["nickname"]}: {"активно" if paid else "приостановлено"}')
                     conn.commit()
                     return self.response(200,{'ok':True})
                 if path=='/api/admin/purchase':
                     pid=int(data.get('player_id',0));p=get_player(conn,pid)
-                    if not p['pass_paid']:raise ValueError('Сначала отметь оплату пропуска за 500 ₽.')
+                    if not p['pass_paid']:raise ValueError('Сначала активируй участие игрока в программе.')
                     amount=int(data.get('amount',0))
                     if amount<400 or amount>1_000_000:raise ValueError('Сумма отдельной покупки должна быть от 400 ₽.')
                     raw=str(data.get('occurred_at','')).strip()
@@ -392,9 +393,12 @@ class Handler(BaseHTTPRequestHandler):
                     receipt=str(data.get('receipt','')).strip()
                     if len(receipt)>96:raise ValueError('Номер операции слишком длинный.')
                     conn.execute('BEGIN IMMEDIATE')
+                    already=conn.execute('SELECT COUNT(*) FROM purchases WHERE player_id=? AND night_date=? AND canceled_at IS NULL',(pid,night)).fetchone()[0]
+                    if already:
+                        raise ValueError('За одну игровую ночь участник может получить только одну отметку, даже если было несколько покупок.')
                     count=conn.execute('SELECT COUNT(*) FROM purchases WHERE player_id=? AND canceled_at IS NULL',(pid,)).fetchone()[0]
                     if count>=30:raise ValueError('Все 30 отметок уже собраны.')
-                    # A lock prevents parallel confirmations producing the same step; SQLite serializes writes.
+                    # SQLite serializes writes; the extra check above prevents more than one mark per night.
                     conn.execute('INSERT INTO purchases(player_id,amount,occurred_at,night_date,receipt,created_at) VALUES(?,?,?,?,?,?)',
                                  (pid,amount,dt.isoformat(timespec='minutes'),night,receipt or None,moscow_now().isoformat(timespec='seconds')))
                     purchase_id=conn.execute('SELECT last_insert_rowid()').fetchone()[0]
