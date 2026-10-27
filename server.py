@@ -139,13 +139,24 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_rewards_player ON rewards(player_id, step);
         ''')
         defaults = {
-            'season_name': 'СЕЗОН 01',
+            'season_name': 'СЕТКА AFTER DARK',
             'season_start': '2026-11-01',
             'season_end': '2026-11-30',
-            'rules': 'Каждая отдельная покупка от 400 ₽ с 21:00 до 09:00 даёт +1 к прогрессу. За одну игровую ночь можно получить только 1 отметку, даже если было несколько покупок. Участие в программе бесплатное. Максимум 30 отметок. Подарки отмечает администратор.'
+            'rules': 'Бессрочное участие: подтверждённая покупка от 400 ₽ в игровой период 21:00–09:00 даёт +1 ночь. Не более 1 отметки за игровую ночь. Пропуск бесплатный. Прогресс накапливается до 30 ночей без месячного сброса.'
         }
         for k, v in defaults.items():
             conn.execute('INSERT OR IGNORE INTO settings(name,value) VALUES (?,?)', (k,v))
+        # Legacy seasons may exist in databases created by previous versions. They no longer expire.
+        conn.execute("UPDATE settings SET value='СЕТКА AFTER DARK' WHERE name='season_name' AND value='СЕЗОН 01'")
+        conn.execute('UPDATE settings SET value=? WHERE name=?',
+                     ('Бессрочная программа: одна отметка за одну игровую ночь 21:00–09:00, покупка от 400 ₽, максимум 30 ночей.', 'rules'))
+        # Update only prizes not already handed out, retaining historic issued records.
+        for step, title in MILESTONES.items():
+            conn.execute('UPDATE rewards SET title=? WHERE category=? AND step=? AND handed_at IS NULL',
+                         (title, 'milestone', step))
+        for step in (6,18,27):
+            conn.execute('UPDATE rewards SET title=?, category=? WHERE category=? AND step=? AND handed_at IS NULL',
+                         (PRIZES[step-1][0], PRIZES[step-1][1], 'upgrade', step))
         conn.execute('DELETE FROM sessions WHERE expires < ?', (int(time.time()),))
     secret_file = DATA_DIR / 'admin_code.txt'
     if not os.environ.get('SETKA_ADMIN_CODE') and not secret_file.exists():
@@ -387,9 +398,7 @@ class Handler(BaseHTTPRequestHandler):
                     now=moscow_now().replace(tzinfo=None)
                     if dt>now+timedelta(minutes=5) or dt<now-timedelta(days=45):
                         raise ValueError('Можно внести покупку за последние 45 дней, не из будущего.')
-                    conf=settings(conn)
-                    if not (conf['season_start']<=night<=conf['season_end']):
-                        raise ValueError('Покупка за пределами дат сезона (см. настройки).')
+                    # Program is permanent; calendar month does not restrict purchase dates.
                     receipt=str(data.get('receipt','')).strip()
                     if len(receipt)>96:raise ValueError('Номер операции слишком длинный.')
                     conn.execute('BEGIN IMMEDIATE')
@@ -441,17 +450,10 @@ class Handler(BaseHTTPRequestHandler):
                     conn.commit()
                     return self.response(200,{'ok':True})
                 if path=='/api/admin/settings':
-                    start=str(data.get('season_start',''))
-                    end=str(data.get('season_end',''))
-                    try:
-                        first=datetime.strptime(start,'%Y-%m-%d');last=datetime.strptime(end,'%Y-%m-%d')
-                    except ValueError:raise ValueError('Даты должны быть в формате ГГГГ-ММ-ДД.')
-                    if first>last or (last-first).days>370:raise ValueError('Проверь даты сезона (максимум 371 день).')
                     name=str(data.get('season_name','')).strip()
-                    if not 2<=len(name)<=60:raise ValueError('Название сезона: 2–60 символов.')
-                    for key,val in [('season_name',name),('season_start',start),('season_end',end)]:
-                        conn.execute('UPDATE settings SET value=? WHERE name=?',(val,key))
-                    log_event(conn,'Настройки',f'Сезон {name}: {start}—{end}')
+                    if not 2<=len(name)<=60:raise ValueError('Название программы: 2–60 символов.')
+                    conn.execute('UPDATE settings SET value=? WHERE name=?',(name,'season_name'))
+                    log_event(conn,'Настройки',f'Название бессрочной программы: {name}')
                     conn.commit()
                     return self.response(200,{'ok':True})
                 return self.fail(404,'Адрес запроса не найден.')
