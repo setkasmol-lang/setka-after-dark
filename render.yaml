@@ -1,0 +1,16 @@
+# Тестовое бесплатное размещение SETKA AFTER DARK на Render
+# Пожалуйста, используйте вымышленные данные: SQLite на бесплатном Render теряется при простое/перезапуске.
+services:
+  - type: web
+    name: setka-after-dark-demo
+    runtime: python
+    plan: free
+    buildCommand: echo "No dependencies to install"
+    startCommand: python server.py
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: SETKA_HTTPS
+        value: "1"
+      - key: SETKA_ADMIN_CODE
+        sync: false
